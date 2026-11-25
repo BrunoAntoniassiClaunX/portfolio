@@ -6,7 +6,7 @@ import { McpServer } from '@modelcontextprotocol/server';
 import * as z from 'zod/v4';
 import { GitHubError, OWNER_PATTERN, REPO_PATTERN } from './github.js';
 
-export const SERVER_INFO = { name: 'github-mcp-server', version: '0.2.0' };
+export const SERVER_INFO = { name: 'github-mcp-server', version: '0.3.0' };
 
 const inputSchema = z.object({
   owner: z

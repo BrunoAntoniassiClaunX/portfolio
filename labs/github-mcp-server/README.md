@@ -2,7 +2,7 @@
 
 A small [Model Context Protocol](https://modelcontextprotocol.io) server in plain Node.js that lets an AI host look up public GitHub repository metadata. It is being built step by step as a portfolio exercise.
 
-**Status: Milestone 2 of 4.** One tool, `get_repository`, served over stdio and backed by the public GitHub REST API. Docker and CI come in later milestones. This is a learning project, not a production service.
+**Status: Milestone 3 of 4.** One tool, `get_repository`, served over stdio and backed by the public GitHub REST API, runnable locally or as a Docker container. CI comes in the last milestone. This is a learning project, not a production service.
 
 ## Requirements
 
@@ -46,6 +46,39 @@ To see the raw JSON-RPC messages without the network, read `test/smoke.test.js`.
 npx @modelcontextprotocol/inspector node src/index.js
 ```
 
+## Run it in Docker
+
+The container speaks MCP over stdin/stdout exactly like the local process. It opens no ports.
+
+```bash
+docker build -t github-mcp-server:local .
+npm run test:container        # offline: official client against the container
+npm run test:container:live   # one real GitHub call through the container
+```
+
+An MCP host launches it like this. `-i` keeps stdin open, `--rm` deletes the container when it exits, and `--init` is recommended (see below):
+
+```bash
+docker run -i --rm --init github-mcp-server:local
+```
+
+To use a token, pass it **by name** so its value is read from your shell and never written in the command:
+
+```bash
+docker run -i --rm --init -e GITHUB_TOKEN github-mcp-server:local
+```
+
+What the image contains:
+
+- `node:24.15.0-alpine`, pinned by digest, the same Node.js version used in development.
+- Production dependencies installed with `npm ci --omit=dev` from `package-lock.json`. The test-only MCP client isn't included.
+- `src/`, owned by root and read-only to the runtime user.
+- It runs as the unprivileged `node` user (uid 1000).
+
+`.dockerignore` is an allowlist (`package.json`, `package-lock.json`, `src/`), so `.env` files, tests, `.git` and local `node_modules` never reach the build.
+
+**Why `--init`:** without it, `node` is process 1 in the container. Linux ignores SIGTERM for process 1 unless a handler is installed. The server installs one at startup, and its `listening on stdio` log line means the handler is ready. A `docker stop` sent during the first moments of startup is ignored until Docker kills the container after its grace period (exit 137). With `--init`, Docker's small init process is process 1 and forwards the signal, so the container stops right away at any time.
+
 ## The tool
 
 `get_repository(owner, repo)` returns:
@@ -82,6 +115,10 @@ Failures come back as tool results with `isError: true` and a readable message: 
 | `test/interop.test.js` | Official MCP client launches the real server over stdio, in both protocol versions. |
 | `test/fixtures/` | Sample GitHub data, and a fake GitHub API loaded into the server process only during tests (`node --import`). |
 | `test/live/github-live.test.js` | One real call to GitHub. Run separately with `npm run test:live`. |
+| `Dockerfile` | Builds the stdio-only image: pinned Node base, `npm ci --omit=dev`, non-root user, no ports. |
+| `.dockerignore` | Allowlist of the only files sent to the Docker build. |
+| `test/container/container.test.js` | Runs the built image offline (`--network none`, fake GitHub mounted read-only). Checks image config, non-root user, image contents, official-client interop, secret safety, `docker stop` and stdin EOF. |
+| `test/container/live/container-live.test.js` | One real GitHub call through the container. |
 
 ## Security choices
 
@@ -111,4 +148,7 @@ Both are tested, with raw JSON-RPC and with the official client.
 - The response body size is not capped (GitHub's repository response is small).
 - stdio only; no HTTP transport.
 - Not yet tried inside a real MCP host such as Claude Desktop.
+- Container tests need a running Docker daemon and a built image, so they are separate from `npm test`.
+- The image is built for the host architecture only (`linux/amd64` on the machine used here). No multi-arch build.
+- Without `--init`, a `docker stop` sent during the first moments of startup is ignored until the grace period ends (see "Why `--init`" above).
 - The live test asserts stable facts about `nodejs/node` (language, default branch). If that repository changes, the live test needs updating.

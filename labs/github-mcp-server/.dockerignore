@@ -1,0 +1,7 @@
+# Allowlist: send only what the image needs to the Docker build.
+# Everything else (node_modules, tests, .env, .git, logs, editor files) is
+# excluded by the first line, so a new secret file can't slip in by accident.
+*
+!package.json
+!package-lock.json
+!src/

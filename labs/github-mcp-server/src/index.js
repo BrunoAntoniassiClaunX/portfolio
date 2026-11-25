@@ -26,10 +26,10 @@ const github = createGitHubClient({ token: process.env.GITHUB_TOKEN, timeoutMs: 
 // serveStdio reads the client's first message, picks the protocol era, then
 // calls this factory once to build the server for the connection.
 const handle = serveStdio(() => createServer({ github, log }));
-// Never log the token itself, only whether one is configured.
-log(`listening on stdio (GitHub auth: ${github.authenticated ? 'token' : 'none'})`);
 
 // Close cleanly on Ctrl+C or `docker stop`. stdin EOF also closes the transport.
+// In a container, node is PID 1: Linux ignores SIGTERM for PID 1 unless a
+// handler is installed, so a signal that arrives before this point is lost.
 let closing = false;
 function shutdown(signal) {
   if (closing) return;
@@ -44,3 +44,7 @@ function shutdown(signal) {
 }
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
+
+// Logged last, so this line means the server is fully ready, signal handlers
+// included. Never log the token itself, only whether one is configured.
+log(`listening on stdio (GitHub auth: ${github.authenticated ? 'token' : 'none'})`);
