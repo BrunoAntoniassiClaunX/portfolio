@@ -69,9 +69,16 @@ export function fakeFetch(handler) {
 }
 
 // A fetch that never answers until its abort signal fires (to test timeouts).
+// Like a real stalled connection, it holds an open handle until aborted.
+// Without it, nothing keeps the event loop alive: AbortSignal.timeout() uses
+// an unref'd timer, and Node 22's test runner then ends the test early.
 export function hangingFetch() {
   return (url, init) =>
     new Promise((_, reject) => {
-      init.signal.addEventListener('abort', () => reject(init.signal.reason));
+      const openSocket = setInterval(() => {}, 60_000);
+      init.signal.addEventListener('abort', () => {
+        clearInterval(openSocket);
+        reject(init.signal.reason);
+      });
     });
 }

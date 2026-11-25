@@ -1,7 +1,10 @@
-# Allowlist: send only what the image needs to the Docker build.
-# Everything else (node_modules, tests, .env, .git, logs, editor files) is
-# excluded by the first line, so a new secret file can't slip in by accident.
+# Allowlist: send only the files the image needs to the Docker build.
+# The first line excludes everything; each `!` line re-includes one exact file.
+# Nothing else under src/ (such as a stray .env) can reach the build, and
+# node_modules, tests, .git and logs are excluded too.
 *
 !package.json
 !package-lock.json
-!src/
+!src/index.js
+!src/server.js
+!src/github.js

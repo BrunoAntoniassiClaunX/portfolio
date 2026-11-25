@@ -16,9 +16,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
 
-# Application code. Files stay owned by root, so the runtime user can read
-# but not modify them.
-COPY src ./src
+# Application code: the three source files, named explicitly. Files stay owned
+# by root, so the runtime user can read but not modify them.
+COPY src/index.js src/server.js src/github.js ./src/
 
 # Run as the unprivileged `node` user (uid 1000) that the base image provides.
 USER node

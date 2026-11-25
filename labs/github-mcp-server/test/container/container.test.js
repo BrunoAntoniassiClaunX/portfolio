@@ -74,13 +74,38 @@ test('runtime user: uid 1000 (node), and application files are read-only to it',
 test('image contents: only production files; no tests, dev dependencies, .env or secrets', async () => {
   const { stdout } = await docker(
     'run', '--rm', '--network', 'none', '--entrypoint', 'sh', IMAGE, '-c',
-    'ls -A /app; echo ---; ls /app/node_modules/@modelcontextprotocol; echo ---; ' +
-      `grep -rlF -e '${PLANTED_SECRET}' -e '${ALNUM_SECRET_CODE}' -e '${ALNUM_SECRET_NAME}' -e fake-github-preload /app || echo no-matches`,
+    'ls -A /app; echo ---; ls -A /app/src; echo ---; ls /app/node_modules/@modelcontextprotocol',
   );
-  const [appEntries, mcpPackages, secretScan] = stdout.trim().split('\n---\n');
+  const [appEntries, srcEntries, mcpPackages] = stdout.trim().split('\n---\n');
   assert.deepEqual(appEntries.split('\n').sort(), ['node_modules', 'package-lock.json', 'package.json', 'src']);
+  assert.deepEqual(srcEntries.split('\n').sort(), ['github.js', 'index.js', 'server.js']);
   assert.deepEqual(mcpPackages.split('\n').sort(), ['core', 'server'], 'dev-only client package must be absent');
-  assert.equal(secretScan.trim(), 'no-matches');
+});
+
+test('image secret scan: grep finds no planted secrets (exit 1), and a grep error fails the test', async () => {
+  // grep exits 0 when it finds a match, 1 when it finds none, 2 on an error.
+  // Only exit 1 means "absent", so the exit code is checked, not the output.
+  // The trailing echo prints grep's real exit code on the last line (and makes
+  // the shell exit 0, so execFile still returns stdout).
+  // Alpine's BusyBox grep can report a per-file read error on stderr and still
+  // exit 1, so stderr must also be empty for the scan to count.
+  const scan = `grep -rlF -e '${PLANTED_SECRET}' -e '${ALNUM_SECRET_CODE}' -e '${ALNUM_SECRET_NAME}' -e fake-github-preload /app`;
+  const { stdout, stderr } = await docker(
+    'run', '--rm', '--network', 'none', '--entrypoint', 'sh', IMAGE, '-c',
+    `${scan}; echo "grep-exit=$?"`,
+  );
+  const lines = stdout.trim().split('\n');
+  assert.equal(lines.at(-1), 'grep-exit=1', `grep must report "no match"; got: ${stdout.trim()}`);
+  assert.deepEqual(lines.slice(0, -1), [], 'no file may contain a planted secret');
+  assert.equal(stderr, '', `grep reported errors, so the scan is not conclusive: ${stderr}`);
+
+  // Control: the same check against a path that does not exist must be
+  // detected as an error (exit 2), not mistaken for "no match".
+  const { stdout: control } = await docker(
+    'run', '--rm', '--network', 'none', '--entrypoint', 'sh', IMAGE, '-c',
+    `grep -rlF -e '${PLANTED_SECRET}' /does-not-exist 2>/dev/null; echo "grep-exit=$?"`,
+  );
+  assert.equal(control.trim(), 'grep-exit=2');
 });
 
 for (const [label, options, expectedVersion] of [
@@ -138,24 +163,27 @@ test('docker stop: SIGTERM reaches node as PID 1 and the container exits 0 witho
   await docker('run', '-d', '-i', '--name', name, '--network', 'none', IMAGE);
   // Wait for the readiness line, which is logged after the signal handlers are
   // installed. A SIGTERM before that is ignored by PID 1 (see README).
-  for (let i = 0; i < 40; i++) {
+  let ready = false;
+  for (let i = 0; i < 50 && !ready; i++) {
     const { stderr } = await docker('logs', name);
-    if (stderr.includes('listening on stdio')) break;
-    await new Promise((r) => setTimeout(r, 100));
+    ready = stderr.includes('listening on stdio');
+    if (!ready) await new Promise((r) => setTimeout(r, 100));
   }
+  assert.ok(ready, 'server never logged "listening on stdio" within 5 s; not sending SIGTERM');
+
   const started = Date.now();
   await docker('stop', '--time', '10', name);
   const elapsed = Date.now() - started;
-  const { stdout } = await docker('inspect', name, '--format', '{{.State.ExitCode}} {{.State.OOMKilled}}');
-  const { stdout: logs } = await docker('logs', name);
-  const { stderr: logErr } = await docker('logs', name);
+  const { stdout: state } = await docker('inspect', name, '--format', '{{.State.ExitCode}} {{.State.OOMKilled}}');
+  // One call: the container's stdout and stderr come back separately.
+  const { stdout: containerStdout, stderr: containerStderr } = await docker('logs', name);
   await docker('rm', name);
   named.delete(name);
 
-  assert.equal(stdout.trim(), '0 false', 'exit code 0 means our SIGTERM handler ran (137 would mean SIGKILL)');
+  assert.equal(state.trim(), '0 false', 'exit code 0 means our SIGTERM handler ran (137 would mean SIGKILL)');
   assert.ok(elapsed < 8000, `stop took ${elapsed} ms; near 10 s would mean the signal was ignored`);
-  assert.equal(logs, '', 'nothing on stdout');
-  assert.match(logErr, /SIGTERM received, shutting down/);
+  assert.equal(containerStdout, '', 'nothing on stdout');
+  assert.match(containerStderr, /SIGTERM received, shutting down/);
 });
 
 test('stdin EOF: closing the client ends the container and --rm removes it', async () => {

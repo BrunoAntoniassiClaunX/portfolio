@@ -1,14 +1,38 @@
 # GitHub MCP Server (lab)
 
-A small [Model Context Protocol](https://modelcontextprotocol.io) server in plain Node.js that lets an AI host look up public GitHub repository metadata. It is being built step by step as a portfolio exercise.
+A small [Model Context Protocol](https://modelcontextprotocol.io) server in plain Node.js that lets an AI host look up public GitHub repository metadata. It was built in four reviewed milestones as a portfolio exercise.
 
-**Status: Milestone 3 of 4.** One tool, `get_repository`, served over stdio and backed by the public GitHub REST API, runnable locally or as a Docker container. CI comes in the last milestone. This is a learning project, not a production service.
+**Status: all four milestones done.** One tool, `get_repository`, served over stdio and backed by the public GitHub REST API. It runs locally or as a Docker container, and a GitHub Actions workflow tests every change to the lab. This is a learning project, not a production service.
+
+## What it demonstrates
+
+- An MCP server built on the official TypeScript SDK v2, supporting both protocol revisions: 2025-11-25 and 2026-07-28.
+- A tool with validated input, a declared output schema, and structured results.
+- Defensive integration with an external API: a fixed destination, no redirects, a timeout, public repositories only, and error messages that never echo raw upstream text.
+- Testing in layers: unit tests with a fake `fetch`, in-process tests with the official client, raw JSON-RPC over stdio, official-client interop over stdio and through Docker, and a separate live check.
+- A small, non-root, stdio-only container image, and CI that never depends on the live GitHub API.
+
+## How it fits together
+
+```mermaid
+flowchart LR
+  host["MCP host or test client"] -- "JSON-RPC over stdin/stdout" --> index["src/index.js<br/>(stdio, signals, env)"]
+  index --> server["src/server.js<br/>(get_repository tool)"]
+  server --> github["src/github.js<br/>(validation, timeout, errors)"]
+  github -- "GET /repos/{owner}/{repo}" --> api["api.github.com"]
+```
+
+1. The host starts the server and writes JSON-RPC messages to its stdin.
+2. `src/index.js` hands the stream to the SDK. The SDK negotiates the protocol version and builds a server instance through `src/server.js`.
+3. For `tools/call`, the SDK checks the arguments against the Zod schema. Then `src/github.js` makes one request to GitHub.
+4. The result, or an `isError` result with a fixed message, goes back as one line on stdout. Logs go to stderr only.
 
 ## Requirements
 
-- Node.js 20 or later (developed on 24.15.0)
+- Node.js 22 or later (CI tests 22, 24 and 26; developed on 24.15.0)
 - npm
-- Network access to `api.github.com` (only for real use and `npm run test:live`)
+- Docker, only for the container commands. On an Intel Mac, Colima with the Docker CLI works.
+- Network access to `api.github.com`, only for real use and the live checks
 
 ## Run it
 
@@ -75,9 +99,29 @@ What the image contains:
 - `src/`, owned by root and read-only to the runtime user.
 - It runs as the unprivileged `node` user (uid 1000).
 
-`.dockerignore` is an allowlist (`package.json`, `package-lock.json`, `src/`), so `.env` files, tests, `.git` and local `node_modules` never reach the build.
+`.dockerignore` is an allowlist of five exact files (`package.json`, `package-lock.json`, and the three files in `src/`), and the `Dockerfile` copies those same files by name. A stray file, even inside `src/` (such as `src/.env`), never reaches the build, and neither do tests, `.git` or local `node_modules`. If you add a source file, add it in both places.
 
 **Why `--init`:** without it, `node` is process 1 in the container. Linux ignores SIGTERM for process 1 unless a handler is installed. The server installs one at startup, and its `listening on stdio` log line means the handler is ready. A `docker stop` sent during the first moments of startup is ignored until Docker kills the container after its grace period (exit 137). With `--init`, Docker's small init process is process 1 and forwards the signal, so the container stops right away at any time.
+
+## Continuous integration
+
+The workflow is at [`.github/workflows/github-mcp-server.yml`](../../.github/workflows/github-mcp-server.yml), in the repository root. It runs on pushes and pull requests that touch this lab, and it can also be started by hand.
+
+| Job | What it runs |
+| --- | --- |
+| `test` (Node 22, 24, 26) | `npm ci`, then `npm test`: all offline tests |
+| `container` (after `test`) | `npm ci`, `docker build`, then `npm run test:container` with `--network none` |
+
+No CI job calls the live GitHub API, so a GitHub outage or rate limit can't fail the build. The two live checks (`test:live` and `test:container:live`) are for running by hand. The workflow has a read-only token (`contents: read`), doesn't keep checkout credentials, and pins every action to a full commit SHA.
+
+## Test layers
+
+| Command | Where it runs | Network | What it proves |
+| --- | --- | --- | --- |
+| `npm test` | host, CI | none needed | The GitHub client logic, tool behavior, raw protocol on stdio, and official-client interop |
+| `npm run test:container` | host with Docker, CI | `--network none` | Image config, non-root user, image contents, interop through `docker run -i`, secret safety, shutdown |
+| `npm run test:live` | host, by hand | real GitHub API | It works against the real service |
+| `npm run test:container:live` | host with Docker, by hand | real GitHub API | It works through the real container |
 
 ## The tool
 
@@ -119,6 +163,7 @@ Failures come back as tool results with `isError: true` and a readable message: 
 | `.dockerignore` | Allowlist of the only files sent to the Docker build. |
 | `test/container/container.test.js` | Runs the built image offline (`--network none`, fake GitHub mounted read-only). Checks image config, non-root user, image contents, official-client interop, secret safety, `docker stop` and stdin EOF. |
 | `test/container/live/container-live.test.js` | One real GitHub call through the container. |
+| `../../.github/workflows/github-mcp-server.yml` | CI workflow: offline tests on Node 22, 24 and 26, then the image build and container tests. |
 
 ## Security choices
 
@@ -148,6 +193,7 @@ Both are tested, with raw JSON-RPC and with the official client.
 - The response body size is not capped (GitHub's repository response is small).
 - stdio only; no HTTP transport.
 - Not yet tried inside a real MCP host such as Claude Desktop.
+- The CI workflow has been checked locally (YAML structure, pinned SHAs, inputs, and every step run by hand, including on Node 22 and 26 in containers), but it hasn't run on GitHub Actions yet.
 - Container tests need a running Docker daemon and a built image, so they are separate from `npm test`.
 - The image is built for the host architecture only (`linux/amd64` on the machine used here). No multi-arch build.
 - Without `--init`, a `docker stop` sent during the first moments of startup is ignored until the grace period ends (see "Why `--init`" above).

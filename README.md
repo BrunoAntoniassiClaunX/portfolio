@@ -14,6 +14,16 @@ Selected case studies on internal software, reliable integrations, and practical
 
 For software engineering interviews, start with the workflow platform. For applied AI, start with invoice validation and multimodal capture. For business automation, start with sales monitoring.
 
+## Executable lab
+
+Unlike the case studies, this project is source code that you can run and test.
+
+| Project | What it demonstrates | Verification |
+| --- | --- | --- |
+| [GitHub MCP Server](labs/github-mcp-server/) | Node.js MCP server on the official SDK, GitHub REST integration with input validation, timeouts and public-only access, Docker (non-root, stdio only), GitHub Actions | Offline tests on Node 22, 24 and 26; container tests with the official MCP client; separate live API checks |
+
+It's a small learning project built in reviewed milestones, not a production service. Its README covers setup, design decisions and known limitations.
+
 ## How I approach delivery
 
 I start with the real workflow, choose the smallest useful solution, and separate implementation from validation and adoption. AI handles unstructured inputs where it adds value; deterministic software handles state changes and business rules where appropriate.
@@ -26,4 +36,4 @@ These are anonymized technical narratives, not the production applications or in
 
 Client and employer names, internal product names, personal data, private repository links, endpoint addresses, authentication details, and raw business records are omitted. Sensitive counts are generalized or explicitly rounded. Technology vendor names are retained to explain the stack.
 
-This repository currently contains documentation only. No proprietary source code, workflow exports, customer screenshots, recordings, credentials, or runnable demos are included. No financial savings or time-reduction percentages are claimed without a measured baseline.
+Apart from the executable lab above, which is original code written for this portfolio, this repository contains documentation only. The case studies include no proprietary source code, workflow exports, customer screenshots, recordings, credentials, or runnable demos. No financial savings or time-reduction percentages are claimed without a measured baseline.
