@@ -1,0 +1,81 @@
+# CI for labs/github-mcp-server.
+# Every job is offline with respect to the GitHub REST API: tests use a fake
+# GitHub API, and the container tests run with --network none. The live API
+# checks (npm run test:live, test:container:live) are manual, local-only.
+
+name: github-mcp-server
+
+on:
+  push:
+    paths:
+      - 'labs/github-mcp-server/**'
+      - '.github/workflows/github-mcp-server.yml'
+  pull_request:
+    paths:
+      - 'labs/github-mcp-server/**'
+      - '.github/workflows/github-mcp-server.yml'
+  workflow_dispatch:
+
+# Read-only token: the workflow never writes to the repository.
+permissions:
+  contents: read
+
+# A newer push to the same branch cancels the run in progress.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    working-directory: labs/github-mcp-server
+
+jobs:
+  test:
+    name: Tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        # Supported Node.js LTS lines (Node 20 reached end of life in April 2026).
+        node: ['22', '24', '26']
+    steps:
+      # Actions are pinned to full commit SHAs; the tag is in the comment.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: labs/github-mcp-server/package-lock.json
+      - name: Install exact dependencies from the lockfile
+        run: npm ci
+      - name: Offline tests (unit, in-process, stdio protocol, official-client interop)
+        run: npm test
+
+  container:
+    name: Container build and tests
+    needs: test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: labs/github-mcp-server/package-lock.json
+      # The test runner needs the dev dependency (official MCP client) on the host.
+      - name: Install exact dependencies from the lockfile
+        run: npm ci
+      - name: Build image
+        run: docker build -t github-mcp-server:local .
+      - name: Show image size and layers
+        run: |
+          docker image ls github-mcp-server:local
+          docker history github-mcp-server:local
+      - name: Container tests (official client over docker run -i, --network none)
+        run: npm run test:container
