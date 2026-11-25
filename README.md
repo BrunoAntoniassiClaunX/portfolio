@@ -1,239 +1,29 @@
-# 🤖 Agente Lia — WhatsApp AI Agent
+# Software Engineering | Applied AI & Automation
 
-> Production conversational AI agent for **Leapmotor Santo André** (Grupo Toriba) — an electric vehicle dealership in São Paulo, Brazil.
+Selected case studies on internal software, reliable integrations, and practical AI workflows. My work spans problem discovery, implementation, testing, and operational handoff.
 
-[![Status](https://img.shields.io/badge/status-production-brightgreen?style=flat)]()
-[![Stack](https://img.shields.io/badge/stack-n8n%20·%20GPT--4o%20·%20Pinecone%20·%20Redis-0A0A0F?style=flat)]()
-[![Channel](https://img.shields.io/badge/channel-WhatsApp%20Business%20API-25D366?style=flat&logo=whatsapp&logoColor=white)]()
+## Selected work
 
----
+| Case study | What it demonstrates | Documented maturity |
+| --- | --- | --- |
+| [Workflow Platform & Controlled Migration](cases/workflow-platform.md) | JavaScript/Node.js, backend safeguards, Jira migration, UI performance | Deployed; operational rollout ongoing |
+| [Serverless Invoice Validation](cases/invoice-validation.md) | Python, AWS, document intelligence, idempotent processing | Validated in staging |
+| [Sales Workflow Monitoring](cases/sales-workflow-monitor.md) | Browser-assisted integration, n8n, Redis, targeted notifications | Daily operational use by a small team |
+| [Agente Lia / Conversational AI](cases/conversational-ai.md) | WhatsApp, RAG, Redis, CRM integration | Previously deployed in production |
+| [Multimodal Product-Cost Capture](cases/multimodal-cost-capture.md) | Voice/image/text extraction, LLM APIs, n8n, structured records | Proof of concept |
 
-## 📌 Overview
+For software engineering interviews, start with the workflow platform. For applied AI, start with invoice validation and multimodal capture. For business automation, start with sales monitoring.
 
-Agente Lia is a fully automated WhatsApp AI agent that handles the entire top-of-funnel sales process for an EV dealership — from first contact to CRM handoff — without any human intervention.
+## How I approach delivery
 
-**The business problem it solves:**
-- Each converted lead represents ~R$200,000 in vehicle revenue
-- Manual follow-up averaged several hours per lead response
-- Sales team was spending most of their time on repetitive qualification tasks
+I start with the real workflow, choose the smallest useful solution, and separate implementation from validation and adoption. AI handles unstructured inputs where it adds value; deterministic software handles state changes and business rules where appropriate.
 
-**What Lia does:**
-- Responds to inbound leads in under 30 seconds, 24/7
-- Answers natural language questions about vehicles using RAG over the full product catalog
-- Qualifies leads, captures intent, and hands off to the CRM automatically
-- Initiates proactive outreach to new leads via interactive WhatsApp messages
-- Escalates to a human sales agent when needed
+Each case explains the problem, my contribution, the technical flow, an important engineering decision, and the scope of the observed result.
 
----
+## Scope and confidentiality
 
-## 🏗️ Architecture
+These are anonymized technical narratives, not the production applications or independently reproduced benchmarks. They summarize project records and reported usage available in the project records; they are not live service-status reports.
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        INBOUND FLOW                         │
-│                                                             │
-│  Lead sends WhatsApp message                                │
-│          │                                                  │
-│          ▼                                                  │
-│   Whapi Webhook  ──────────────────►  n8n Cloud            │
-│                                         │                  │
-│                              ┌──────────┼──────────┐       │
-│                              │          │          │       │
-│                              ▼          ▼          ▼       │
-│                           Redis      Pinecone   OpenAI     │
-│                          (memory)    (RAG)      (GPT-4o)   │
-│                              │          │          │       │
-│                              └──────────┼──────────┘       │
-│                                         │                  │
-│                              ┌──────────┼──────────┐       │
-│                              │                     │       │
-│                              ▼                     ▼       │
-│                         Whapi API             Syonet CRM   │
-│                     (send response)         (lead handoff) │
-└─────────────────────────────────────────────────────────────┘
+Client and employer names, internal product names, personal data, private repository links, endpoint addresses, authentication details, and raw business records are omitted. Sensitive counts are generalized or explicitly rounded. Technology vendor names are retained to explain the stack.
 
-┌─────────────────────────────────────────────────────────────┐
-│                       PROACTIVE FLOW                        │
-│                                                             │
-│  New lead enters Syonet                                     │
-│          │                                                  │
-│          ▼                                                  │
-│   n8n Manual/Webhook Trigger                                │
-│          │                                                  │
-│          ▼                                                  │
-│   Redis SET (session init)                                  │
-│          │                                                  │
-│          ▼                                                  │
-│   Whapi Interactive Message                                 │
-│   (buttons: "Yes, tell me more" / "No, thanks")            │
-└─────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 🛠️ Tech Stack
-
-| Layer | Technology | Purpose |
-|---|---|---|
-| Orchestration | **n8n Cloud** | Workflow engine, webhook handling, conditional routing |
-| LLM | **OpenAI GPT-4o** | Natural language understanding and response generation |
-| WhatsApp | **Whapi.cloud** | WhatsApp Business API gateway (send/receive messages) |
-| Memory | **Upstash Redis** | Session memory — multi-turn conversation history |
-| Vector Search | **Pinecone** | RAG over vehicle catalog PDFs |
-| Chatbot UI | **Typebot** | Structured qualification flows (future expansion) |
-| CRM | **Syonet** | Lead registration and commercial team handoff |
-
----
-
-## 🔄 n8n Workflow Structure
-
-### Receptive Flow (handles incoming messages)
-
-```
-Webhook
-  └─► If: not a group chat?
-        └─► If: has text or button reply?
-              ├─► If: button = "btn_sim"?
-              │     └─► Send Typebot link
-              ├─► If: button = "btn_nao"?
-              │     └─► Close conversation gracefully
-              └─► AI Agent Fallback
-                    ├─► Redis GET (fetch session history)
-                    ├─► Pinecone Query (RAG context)
-                    ├─► GPT-4o (generate response)
-                    ├─► Redis SET (update session)
-                    └─► Whapi (send response)
-```
-
-### Proactive Flow (initiates outreach)
-
-```
-Manual Trigger (lead data: name, phone, model, type, salesperson)
-  └─► Redis SET (initialize session)
-        └─► Whapi Interactive Message (buttons)
-```
-
----
-
-## 📦 Key Implementation Details
-
-### Whapi Payload Structure
-
-```json
-// Incoming message fields
-{
-  "messages[0].from": "+5511999999999",
-  "messages[0].from_name": "Lead Name",
-  "messages[0].text.body": "typed message",
-  "messages[0].reply.buttons_reply.id": "btn_sim",
-  "messages[0].chat_id": "5511999999999@s.whatsapp.net"
-}
-
-// Outgoing text message
-{
-  "to": "+5511999999999",
-  "body": "Lia's response here"
-}
-```
-
-### Redis Session Structure
-
-```json
-// Key: phone number (from field)
-// TTL: 30 minutes
-[
-  { "role": "user", "content": "Quero saber sobre o C10" },
-  { "role": "assistant", "content": "O Leapmotor C10 é um SUV elétrico..." }
-]
-```
-
-### RAG Pipeline
-
-```
-Vehicle catalog PDFs
-        │
-        ▼
-  Text extraction + chunking (512 tokens, 50 overlap)
-        │
-        ▼
-  OpenAI text-embedding-3-small
-        │
-        ▼
-  Pinecone index (upsert)
-        │
-        ▼
-  At query time: embed user message → top_k=3 chunks → inject into GPT-4o system prompt
-```
-
-### Group Chat Filter
-
-```javascript
-// Ignore all group messages
-if ($json.messages[0].chat_id.includes("@g.us")) {
-  // stop execution
-}
-```
-
----
-
-## 🧠 System Prompt Design
-
-Lia's prompt is engineered for:
-- **Brevity** — 2-3 sentences max per response (WhatsApp UX)
-- **Brand voice** — friendly, knowledgeable, non-pushy
-- **Graceful fallback** — redirects off-topic messages back to qualification
-- **Language** — Brazilian Portuguese, informal register
-
----
-
-## ⚠️ Known Gotchas
-
-| Issue | Solution |
-|---|---|
-| n8n JSON Body ignores `={{ }}` expressions | Use Raw Body + `JSON.stringify()` |
-| Whapi uses `to` + `body` fields | Not `phone` + `message` like Z-API |
-| Button titles with emojis/accents render as arrows | Use plain ASCII for button labels |
-| n8n Pinned Data uses stale data in executions | Always click Unpin before live testing |
-| WhatsApp group messages trigger webhook | Filter by `@g.us` in chat_id |
-
----
-
-## 📈 Results
-
-| Metric | Before | After |
-|---|---|---|
-| First response time | 2–6 hours | < 30 seconds |
-| Coverage | Business hours only | 24/7 |
-| Leads handled per day | Limited by headcount | Unlimited |
-| Sales team time on qualification | High | Near zero |
-
----
-
-## 🗂️ Repository Structure
-
-```
-agente-lia/
-├── workflows/
-│   ├── lia_receptive_flow.json     # n8n workflow — handles incoming messages
-│   └── lia_proactive_flow.json     # n8n workflow — initiates outreach
-├── prompts/
-│   └── lia_system_prompt.md        # Lia's system prompt (PT-BR)
-├── docs/
-│   ├── architecture.md             # Detailed architecture notes
-│   └── whapi_payload_reference.md  # Whapi field reference
-└── README.md
-```
-
----
-
-## 🏢 About ClaunX
-
-**ClaunX Automation & AI** — *Unlocking Intelligence. Prosperity Through Automation.*
-
-We build production-grade AI agents and automation systems for businesses that are done doing things manually.
-
-[claunx.com](https://claunx.com) · [LinkedIn](https://linkedin.com/in/brunoantoniassi)
-
----
-
-*Built by [Bruno Antoniassi](https://github.com/BrunoAntoniassiClaunX) · ClaunX Automation & AI · São Paulo, Brazil*
+This repository currently contains documentation only. No proprietary source code, workflow exports, customer screenshots, recordings, credentials, or runnable demos are included. No financial savings or time-reduction percentages are claimed without a measured baseline.
